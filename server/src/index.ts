@@ -28,8 +28,10 @@ if (process.env.NODE_ENV === 'production') {
     const clientDistPath = path.join(__dirname, '../../client/dist');
     app.use(express.static(clientDistPath));
 
-    // In Express 5 router, '*' is not valid. Must use regex-like capture or Splat
-    app.get(/(.*)/, (req, res) => {
+    // Correct Express 5 syntax for 'catch all' is often just a middleware at the end or proper regex
+    // Using a named splat parameter {0,} or simply handling 404s
+    // safest cross-version way for SPA fallback:
+    app.get('*', (req, res) => {
         res.sendFile(path.join(clientDistPath, 'index.html'));
     });
 }
