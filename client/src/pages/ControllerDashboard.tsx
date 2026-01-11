@@ -14,6 +14,7 @@ interface AllocationResult {
     rank: number;
     allocatedVolume: number;
     allocationFactor: number;
+    tmBidCount: number;
 }
 
 const ControllerDashboard: React.FC = () => {
@@ -31,9 +32,10 @@ const ControllerDashboard: React.FC = () => {
 
     useEffect(() => {
         if (!socket) return;
-        if (!isAuthenticated) return;
 
-        socket.emit('get_initial_state');
+        const fetchInitial = () => socket.emit('get_initial_state');
+        fetchInitial();
+        socket.on('connect', fetchInitial);
 
         socket.on('game_state_update', (st) => {
             setGameState(st);
@@ -71,6 +73,7 @@ const ControllerDashboard: React.FC = () => {
         });
 
         return () => {
+            socket.off('connect', fetchInitial);
             socket.off('game_state_update');
             socket.off('teams_update');
             socket.off('allocation_results');
@@ -144,6 +147,9 @@ const ControllerDashboard: React.FC = () => {
                     <button type="submit" className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded">
                         Enter Controller
                     </button>
+                    <div className="mt-4 text-center">
+                        <a href="/" className="text-gray-500 text-xs underline">Back to Game</a>
+                    </div>
                 </form>
             </div>
         );
@@ -151,12 +157,106 @@ const ControllerDashboard: React.FC = () => {
 
     if (!gameState) return <div className="text-white p-10">Loading Controller State...</div>;
 
+
+    // --- New Detailed Financials Table Component ---
+    const DetailedFinancialsTable = ({ data, leaderboard, forceRefresh, onRecalculate }: { data: any[], leaderboard: any[], forceRefresh: () => void, onRecalculate: () => void }) => {
+        if (!data || data.length === 0) {
+            return (
+                <div className="p-8 text-center text-gray-500 bg-gray-900/50 rounded-lg border border-dashed border-gray-700">
+                    <p className="mb-4">No financial data found for this period.</p>
+                    <div className="flex justify-center gap-4">
+                        <button onClick={forceRefresh} className="bg-blue-600 px-4 py-2 rounded text-white text-xs font-bold">Refresh View</button>
+                        <button onClick={onRecalculate} className="bg-yellow-600 px-4 py-2 rounded text-white text-xs font-bold">Force Recalculate (Server)</button>
+                    </div>
+                </div>
+            );
+        }
+
+        return (
+            <div className="space-y-4">
+                <div className="flex justify-end gap-2 mb-2">
+                    <button onClick={forceRefresh} className="text-blue-400 hover:text-blue-300 text-xs underline">Refresh</button>
+                    <button onClick={onRecalculate} className="text-yellow-400 hover:text-yellow-300 text-xs underline">Recalculate</button>
+                </div>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-xs text-left text-gray-300 table-auto whitespace-nowrap">
+                        <thead className="bg-gray-700/50 uppercase font-bold text-gray-400">
+                            <tr>
+                                <th className="p-3 sticky left-0 bg-gray-800 z-10 border-r border-gray-700">Team</th>
+                                <th className="p-3 text-right">M3 Val Alloc</th>
+                                <th className="p-3 text-right bg-gray-800/30">Rev (Rs)</th>
+                                <th className="p-3 text-right">Rev/m³</th>
+                                <th className="p-3 text-right bg-red-900/10">RM Cost</th>
+                                <th className="p-3 text-right">RM/m³</th>
+                                <th className="p-3 text-right bg-red-900/10">TM Cost</th>
+                                <th className="p-3 text-right">TM/m³</th>
+                                <th className="p-3 text-right bg-red-900/10">Prod Cost</th>
+                                <th className="p-3 text-right">Prod/m³</th>
+                                <th className="p-3 text-right bg-green-900/20 text-white border-l border-gray-600">EBITDA</th>
+                                <th className="p-3 text-right">EBITDA/m³</th>
+                                <th className="p-3 text-right bg-blue-900/20 text-white font-black border-l border-blue-500">Cum. EBITDA</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-700">
+                            {data.map((row) => {
+                                // Find cumulative stats for this team
+                                const lbStats = leaderboard.find(l => l.teamId === row.team_id);
+                                const totalGameEBITDA = lbStats ? lbStats.totalGameEbitdaPaise : 0;
+                                const vol = row.sales_vol || 0;
+
+                                const formatVal = (val: any) => {
+                                    if (isNaN(val) || val === null || val === undefined) return 'NP';
+                                    return (val / 100).toLocaleString();
+                                };
+
+                                const formatPerUnit = (val: any, volume: number) => {
+                                    if (isNaN(val) || val === null || val === undefined) return 'NP';
+                                    if (volume <= 0) return '-';
+                                    return (val / 100 / volume).toFixed(0);
+                                };
+
+                                return (
+                                    <tr key={row.team_id} className="hover:bg-gray-700/30 transition-colors">
+                                        <td className="p-3 font-bold text-white sticky left-0 bg-gray-800 border-r border-gray-700">
+                                            {teams.find(t => t.id === row.team_id)?.name || `Team ${row.team_id}`}
+                                        </td>
+                                        <td className="p-3 text-right text-white font-mono">{vol.toLocaleString()}</td>
+                                        <td className="p-3 text-right text-green-300 bg-gray-800/30 font-mono">{formatVal(row.revenue_paise)}</td>
+                                        <td className="p-3 text-right text-gray-500 font-mono">{formatPerUnit(row.revenue_paise, vol)}</td>
+                                        <td className="p-3 text-right text-red-300 bg-red-900/10 font-mono">{formatVal(row.rm_cost_paise)}</td>
+                                        <td className="p-3 text-right text-gray-500 font-mono">{formatPerUnit(row.rm_cost_paise, vol)}</td>
+                                        <td className="p-3 text-right text-red-300 bg-red-900/10 font-mono">{formatVal(row.tm_cost_paise)}</td>
+                                        <td className="p-3 text-right text-gray-500 font-mono">{formatPerUnit(row.tm_cost_paise, vol)}</td>
+                                        <td className="p-3 text-right text-red-300 bg-red-900/10 font-mono">{formatVal(row.prod_cost_paise)}</td>
+                                        <td className="p-3 text-right text-gray-500 font-mono">{formatPerUnit(row.prod_cost_paise, vol)}</td>
+                                        <td className={`p-3 text-right font-bold border-l border-gray-600 bg-green-900/20 font-mono ${row.ebitda_paise >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                            {formatVal(row.ebitda_paise)}
+                                        </td>
+                                        <td className="p-3 text-right text-gray-500 font-mono">{formatPerUnit(row.ebitda_paise, vol)}</td>
+                                        <td className={`p-3 text-right font-black border-l border-blue-500 bg-blue-900/20 font-mono ${totalGameEBITDA >= 0 ? 'text-blue-400' : 'text-red-400'}`}>
+                                            {formatVal(totalGameEBITDA)}
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        );
+    };
+
     return (
-        <div className="p-6 bg-gray-900 text-white min-h-screen font-sans">
+        <div className="min-h-screen bg-gray-900 text-white p-6 font-sans">
             {/* Header */}
             <div className="flex justify-between items-center mb-8 border-b border-gray-700 pb-4">
-                <h1 className="text-3xl font-bold text-purple-400">Admin Controller</h1>
-                <div className="flex gap-4">
+                <div className="flex items-center gap-4">
+                    <img src="/rdc-logo.png" alt="RDC" className="h-16 opacity-90" onError={(e) => e.currentTarget.style.display = 'none'} />
+                    <h1 className="text-3xl font-black bg-gradient-to-r from-purple-400 to-pink-600 bg-clip-text text-transparent">
+                        Admin Controller
+                    </h1>
+                </div>
+                <div className="flex items-center gap-6">
                     <div className="bg-gray-800 px-4 py-2 rounded">
                         <span className="text-gray-400 text-xs uppercase tracking-wider">Phase</span>
                         <div className="font-mono text-xl text-green-400">{gameState.phase}</div>
@@ -174,29 +274,61 @@ const ControllerDashboard: React.FC = () => {
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                 {/* Left Col: Financials Data (Wider) */}
-                <div className="lg:col-span-8 space-y-6">
+                <div className="lg:col-span-12 xl:col-span-9 space-y-6">
                     <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-xl">
                         <h3 className="text-xl font-bold mb-4 text-green-400 flex items-center gap-2">
-                            <span>💰</span> Financials Overview (Month {gameState.currentMonthWithinQuarter || 1}, Q{gameState.currentQuarter || 1})
+                            <span>💰</span> Detailed Game Financials
                         </h3>
-                        <FinancialsTable
+                        <DetailedFinancialsTable
                             data={financialsData}
+                            leaderboard={leaderboardData}
                             forceRefresh={() => socket?.emit('get_all_month_financials', { quarterId: gameState.currentQuarter || 1, monthId: gameState.currentMonthWithinQuarter || 1 })}
                             onRecalculate={() => socket?.emit('admin_recalculate_financials', { quarterId: gameState.currentQuarter || 1 })}
                         />
                     </div>
 
-                    {/* LEADERBOARD TABLE */}
+                    {/* Leaderboard Section */}
                     <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-xl">
                         <h3 className="text-xl font-bold mb-4 text-yellow-400 flex items-center gap-2">
-                            <span>🏆</span> Cumulative Leaderboard
+                            <span>🏆</span> Leader Board
                         </h3>
-                        <LeaderboardTable data={leaderboardData} />
+                        {leaderboardData.length === 0 ? (
+                            <div className="text-gray-500 italic p-4">No leaderboard data available yet.</div>
+                        ) : (
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left text-sm text-gray-300">
+                                    <thead className="bg-gray-700/50 text-xs uppercase font-bold text-gray-400">
+                                        <tr>
+                                            <th className="p-3">Rank</th>
+                                            <th className="p-3">Team</th>
+                                            <th className="p-3 text-right">Total Game EBITDA</th>
+                                            <th className="p-3 text-right">Current Q EBITDA</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-700">
+                                        {leaderboardData.map((row, i) => (
+                                            <tr key={i} className={`hover:bg-gray-700/30 transition-colors ${i === 0 ? 'bg-yellow-900/10' : ''}`}>
+                                                <td className="p-3 font-bold text-white">#{i + 1}</td>
+                                                <td className="p-3 font-bold text-white">
+                                                    {row.teamName} <span className="text-gray-500 text-xs font-normal">({row.teamId})</span>
+                                                </td>
+                                                <td className={`p-3 text-right font-bold text-lg ${row.totalGameEbitdaPaise >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                                    ₹{(row.totalGameEbitdaPaise / 100).toLocaleString()}
+                                                </td>
+                                                <td className="p-3 text-right text-gray-400">
+                                                    ₹{(row.quarterEbitdaPaise / 100).toLocaleString()}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
                     </div>
                 </div>
 
                 {/* Right Col: Controls & Progress (Narrower) */}
-                <div className="lg:col-span-4 space-y-6">
+                <div className="lg:col-span-12 xl:col-span-3 space-y-6">
                     {msg && (
                         <div className="bg-blue-900/20 border-l-4 border-blue-500 p-4 font-mono text-sm text-blue-200 animate-pulse">
                             {msg}
@@ -330,6 +462,13 @@ const ControllerDashboard: React.FC = () => {
                             >
                                 Reset Entire Game
                             </button>
+
+                            <button
+                                onClick={() => socket?.emit('admin_sync_state', 'admin123')}
+                                className="w-full bg-gray-700 hover:bg-gray-600 text-gray-300 font-bold py-2 rounded border border-gray-600 text-sm"
+                            >
+                                📡 Force Sync/Refresh Clients
+                            </button>
                         </div>
                     </div>
 
@@ -343,19 +482,27 @@ const ControllerDashboard: React.FC = () => {
                                 <table className="w-full text-left text-xs text-gray-300">
                                     <thead className="bg-gray-700/50 sticky top-0">
                                         <tr>
-                                            <th className="p-2">Rank</th>
                                             <th className="p-2">Team</th>
-                                            <th className="p-2 text-right">Vol</th>
-                                            <th className="p-2 text-right">Fill</th>
+                                            <th className="p-2 text-right">RM Bid P</th>
+                                            <th className="p-2 text-right">RM Bid Q</th>
+                                            <th className="p-2">Rank</th>
+                                            <th className="p-2 text-right">RM Alloc %</th>
+                                            <th className="p-2 text-right">RM Alloc Q</th>
+                                            <th className="p-2 text-right">TM Bid/Mo</th>
+                                            <th className="p-2 text-right">TM Alloc/Mo</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-700">
                                         {allocations.map((row) => (
                                             <tr key={row.teamId} className="hover:bg-gray-700/30">
-                                                <td className="p-2 font-bold text-white">#{row.rank}</td>
-                                                <td className="p-2">{row.teamId}</td>
-                                                <td className="p-2 text-right text-white">{row.allocatedVolume.toLocaleString()}</td>
+                                                <td className="p-2 font-bold text-white">{row.teamId}</td>
+                                                <td className="p-2 text-right">₹{(row.bidPricePaise / 100).toLocaleString()}</td>
+                                                <td className="p-2 text-right">{row.bidVolume.toLocaleString()}</td>
+                                                <td className="p-2 font-bold text-yellow-400">#{row.rank}</td>
                                                 <td className="p-2 text-right text-gray-400">{(row.allocationFactor * 100).toFixed(0)}%</td>
+                                                <td className="p-2 text-right text-green-400 font-bold">{row.allocatedVolume.toLocaleString()}</td>
+                                                <td className="p-2 text-right">{row.tmBidCount}</td>
+                                                <td className="p-2 text-right text-blue-400 font-bold">{row.tmBidCount}</td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -433,100 +580,5 @@ const CustomerAllocationTable = ({ socket, quarterId }: { socket: any, quarterId
     );
 };
 
-const FinancialsTable = ({ data, forceRefresh, onRecalculate }: { data: any[], forceRefresh: () => void, onRecalculate: () => void }) => {
-    if (!data || data.length === 0) {
-        return (
-            <div className="flex flex-col gap-2 p-4 bg-gray-900/50 rounded">
-                <div className="text-gray-500 italic">No financial data found.</div>
-                <div className="flex gap-2">
-                    <button
-                        onClick={forceRefresh}
-                        className="text-xs bg-blue-700 hover:bg-blue-600 text-white px-3 py-1 rounded"
-                    >
-                        Refresh View
-                    </button>
-                    <button
-                        onClick={onRecalculate}
-                        className="text-xs bg-yellow-700 hover:bg-yellow-600 text-white px-3 py-1 rounded"
-                    >
-                        Force Recalculate (Server)
-                    </button>
-                </div>
-            </div>
-        );
-    }
-
-    return (
-        <div className="overflow-x-auto relative">
-            <button
-                onClick={forceRefresh}
-                className="absolute top-0 right-0 text-xs bg-gray-700 hover:bg-gray-600 text-white px-2 py-1 rounded z-10"
-                title="Refresh Financials"
-            >
-                ↻
-            </button>
-            <table className="w-full text-left text-sm text-gray-300">
-                <thead className="bg-gray-700/50 text-xs uppercase font-bold text-gray-400">
-                    <tr>
-                        <th className="p-3">Team</th>
-                        <th className="p-3 text-right">Revenue</th>
-                        <th className="p-3 text-right">EBITDA</th>
-                        <th className="p-3 text-right">Closing Cash</th>
-                    </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-700">
-                    {data.map((row, i) => (
-                        <tr key={i} className="hover:bg-gray-700/30 transition-colors">
-                            <td className="p-3 font-bold text-white">
-                                {row.team_name} <span className="text-gray-500 text-xs font-normal">({row.team_id})</span>
-                            </td>
-                            <td className="p-3 text-right text-green-300">₹{(row.revenue_paise / 100).toLocaleString()}</td>
-                            <td className={`p-3 text-right font-bold ${row.ebitda_paise >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                ₹{(row.ebitda_paise / 100).toLocaleString()}
-                            </td>
-                            <td className="p-3 text-right text-white font-mono">₹{(row.cash_closing_paise / 100).toLocaleString()}</td>
-                        </tr>
-                    ))}
-                </tbody>
-            </table>
-        </div>
-    );
-};
-
-// Helper Component for Leaderboard Table
-const LeaderboardTable = ({ data }: { data: any[] }) => {
-    if (!data || data.length === 0) return <div className="text-gray-500 italic p-4">No cumulative data available.</div>;
-
-    return (
-        <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-gray-300">
-                <thead className="bg-gray-700/50 text-xs uppercase font-bold text-gray-400">
-                    <tr>
-                        <th className="p-3">Rank</th>
-                        <th className="p-3">Team</th>
-                        <th className="p-3 text-right">Total Game EBITDA</th>
-                        <th className="p-3 text-right">Current Q EBITDA</th>
-                    </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-700">
-                    {data.map((row, i) => (
-                        <tr key={i} className={`hover:bg-gray-700/30 transition-colors ${i === 0 ? 'bg-yellow-900/10' : ''}`}>
-                            <td className="p-3 font-bold text-white">#{i + 1}</td>
-                            <td className="p-3 font-bold text-white">
-                                {row.teamName} <span className="text-gray-500 text-xs font-normal">({row.teamId})</span>
-                            </td>
-                            <td className={`p-3 text-right font-bold text-lg ${row.totalGameEbitdaPaise >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                ₹{(row.totalGameEbitdaPaise / 100).toLocaleString()}
-                            </td>
-                            <td className="p-3 text-right text-gray-400">
-                                ₹{(row.quarterEbitdaPaise / 100).toLocaleString()}
-                            </td>
-                        </tr>
-                    ))}
-                </tbody>
-            </table>
-        </div>
-    );
-};
 
 export default ControllerDashboard;

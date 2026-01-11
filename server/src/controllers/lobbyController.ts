@@ -36,7 +36,6 @@ export async function updateGamePhase(phase: string): Promise<GameState> {
     );
     const result = await query('SELECT id, current_quarter as "currentQuarter", current_month_within_quarter as "currentMonthWithinQuarter", phase, market_size_current_month as "marketSizeCurrentMonth", is_paused as "isPaused" FROM game_state WHERE id = 1');
     return result.rows[0];
-    return result.rows[0];
 }
 
 export async function transitionToMonthStart(quarter: number, month: number): Promise<GameState> {

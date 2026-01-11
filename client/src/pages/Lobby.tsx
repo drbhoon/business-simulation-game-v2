@@ -25,24 +25,22 @@ const Lobby: React.FC = () => {
     useEffect(() => {
         if (!socket) return;
 
-        socket.emit('get_initial_state');
+        const fetchState = () => socket.emit('get_initial_state');
 
-        socket.on('teams_update', (updatedTeams: Team[]) => {
-            setTeams(updatedTeams);
-        });
+        // Initial fetch
+        fetchState();
 
-        socket.on('game_state_update', (state: GameState) => {
-            setGameState(state);
-        });
+        // Listeners
+        socket.on('connect', fetchState); // Re-fetch on reconnect
+        socket.on('teams_update', (updatedTeams: Team[]) => setTeams(updatedTeams));
+        socket.on('game_state_update', (state: GameState) => setGameState(state));
 
         socket.on('registration_success', (team: Team) => {
             setRegisteredTeam(team);
             setError('');
         });
 
-        socket.on('error_message', (msg: string) => {
-            setError(msg);
-        });
+        socket.on('error_message', (msg: string) => setError(msg));
 
         socket.on('game_reset', (newState: GameState) => {
             setRegisteredTeam(null);
@@ -54,6 +52,7 @@ const Lobby: React.FC = () => {
         });
 
         return () => {
+            socket.off('connect', fetchState);
             socket.off('teams_update');
             socket.off('game_state_update');
             socket.off('registration_success');
@@ -159,10 +158,129 @@ const Lobby: React.FC = () => {
                     </div>
                 </div>
             </div>
+
+            {/* Game Instructions Section */}
+            <div className="max-w-6xl mx-auto mt-8">
+                <div className="bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-700">
+                    <h2 className="text-2xl font-bold mb-6 text-yellow-400 flex items-center gap-2">
+                        <span>📋</span> Information You Should Read Before Participation
+                    </h2>
+
+                    <div className="space-y-6 text-gray-300">
+                        {/* Market & Capacity */}
+                        <div className="bg-gray-700/30 p-4 rounded-lg">
+                            <h3 className="font-bold text-blue-300 mb-2">Market Size & Capacity</h3>
+                            <ul className="list-disc list-inside space-y-1 text-sm">
+                                <li><strong>Market Size per month</strong> = No. of Players × 40,000 m³</li>
+                                <li><strong>Your Capacity</strong> = 50,000 m³ per month (You cannot bid more per month)</li>
+                            </ul>
+                        </div>
+
+                        {/* Customers Table */}
+                        <div className="bg-gray-700/30 p-4 rounded-lg">
+                            <h3 className="font-bold text-blue-300 mb-3">Four Customers</h3>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead className="bg-gray-800 text-xs uppercase">
+                                        <tr>
+                                            <th className="p-2 text-left">Sr No</th>
+                                            <th className="p-2 text-left">Customer Name</th>
+                                            <th className="p-2 text-right">Market Share</th>
+                                            <th className="p-2 text-right">Payment Terms</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-700">
+                                        <tr><td className="p-2">1</td><td className="p-2">Laddu</td><td className="p-2 text-right">40%</td><td className="p-2 text-right">60 days</td></tr>
+                                        <tr><td className="p-2">2</td><td className="p-2">Shahi</td><td className="p-2 text-right">30%</td><td className="p-2 text-right">30 days</td></tr>
+                                        <tr><td className="p-2">3</td><td className="p-2">Lemon</td><td className="p-2 text-right">20%</td><td className="p-2 text-right">Immediate</td></tr>
+                                        <tr><td className="p-2">4</td><td className="p-2">Jamoon</td><td className="p-2 text-right">10%</td><td className="p-2 text-right">Immediate</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        {/* Resources */}
+                        <div className="bg-gray-700/30 p-4 rounded-lg">
+                            <h3 className="font-bold text-blue-300 mb-2">Resources (Beginning of Each Quarter)</h3>
+                            <div className="space-y-3 text-sm">
+                                <div>
+                                    <p className="font-semibold text-green-300">📦 Raw Material (RM)</p>
+                                    <ul className="list-disc list-inside ml-4 mt-1 space-y-1">
+                                        <li>Bought in m³ at the start of the quarter by bidding</li>
+                                        <li>Highest bid gets 100%, next gets 90%, and so on</li>
+                                        <li>If RM is short, you will be given RM @ highest bid + 10% penalty</li>
+                                    </ul>
+                                </div>
+                                <div>
+                                    <p className="font-semibold text-green-300">🚚 Transit Mixer (TM)</p>
+                                    <ul className="list-disc list-inside ml-4 mt-1 space-y-1">
+                                        <li>Order by numbers. TMs remain till end of quarter</li>
+                                        <li>Cost: Rs 1,80,000 per TM (can do 540 m³ per month)</li>
+                                        <li>If short, TM automatically allotted @ Rs 2,50,000 per month</li>
+                                    </ul>
+                                </div>
+                                <div>
+                                    <p className="font-semibold text-green-300">🏭 Production Cost (Tiered)</p>
+                                    <ul className="list-disc list-inside ml-4 mt-1 space-y-1">
+                                        <li>Rs 400/m³ if volume {'>'} 30,000</li>
+                                        <li>Rs 500/m³ if volume between 20,000 - 30,000</li>
+                                        <li>Rs 600/m³ if volume between 10,000 - 20,000</li>
+                                        <li>Rs 700/m³ if volume {'<'} 10,000</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Working Capital */}
+                        <div className="bg-gray-700/30 p-4 rounded-lg">
+                            <h3 className="font-bold text-blue-300 mb-2">💰 Working Capital</h3>
+                            <ul className="list-disc list-inside space-y-1 text-sm">
+                                <li>Initially: Rs 10 Cr seed working capital (no interest)</li>
+                                <li>Additional borrowing: Up to Rs 10 Cr @ 2% per month interest</li>
+                                <li>Maximum working capital possible: Rs 20 Cr</li>
+                            </ul>
+                        </div>
+
+                        {/* Monthly Auction */}
+                        <div className="bg-gray-700/30 p-4 rounded-lg">
+                            <h3 className="font-bold text-blue-300 mb-2">🎯 Monthly Customer Auction Cycles</h3>
+                            <ul className="list-disc list-inside space-y-1 text-sm">
+                                <li>Each quarter has <strong>3 monthly cycles</strong> to get volume</li>
+                                <li>Volumes come at selling price discovered through <strong>reverse auction</strong></li>
+                                <li>You decide selling price and quantity for each customer</li>
+                                <li><strong>Max selling price: Rs 7,000 per m³</strong></li>
+                                <li>After all orders, announcement confirms your order with quantities</li>
+                            </ul>
+                        </div>
+
+                        {/* Financials */}
+                        <div className="bg-gray-700/30 p-4 rounded-lg">
+                            <h3 className="font-bold text-blue-300 mb-2">📊 Financials & Payments</h3>
+                            <ul className="list-disc list-inside space-y-1 text-sm">
+                                <li>Each month: Financials, TMs, and RM remaining will be displayed</li>
+                                <li>RM balance at quarter end: Sold at lowest bid price, added to EBITDA</li>
+                                <li>TM and RM vendor payments: Auto-debited at end of every month</li>
+                                <li>Closing balance shown monthly - <strong>keep your own records!</strong></li>
+                            </ul>
+                        </div>
+
+                        {/* Game Duration */}
+                        <div className="bg-orange-900/20 p-4 rounded-lg border border-orange-700/50">
+                            <h3 className="font-bold text-orange-300 mb-2">⏱️ Game Duration</h3>
+                            <ul className="list-disc list-inside space-y-1 text-sm">
+                                <li><strong>15 minutes</strong> at start for strategy, forecasting, and planning</li>
+                                <li>Game played for <strong>maximum 4 quarters</strong></li>
+                                <li>Can be stopped at any quarter at Control's discretion</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div className="text-center mt-12 text-gray-600 text-xs">
                 Admin? Go to <a href="/controller" className="underline hover:text-gray-400">/controller</a>
             </div>
-        </div>
+        </div >
     );
 };
 

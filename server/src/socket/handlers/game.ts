@@ -154,6 +154,16 @@ export function handleGameEvents(io: Server, socket: Socket) {
         }
     });
 
+    socket.on('get_my_financials_history', async (data: { teamId: number, quarterId: number }) => {
+        try {
+            const { getTeamFinancialsHistory } = require('../../controllers/financialsController');
+            const dataRes = await getTeamFinancialsHistory(data.teamId, data.quarterId);
+            socket.emit('my_financials_history', dataRes);
+        } catch (err) {
+            console.error(err);
+        }
+    });
+
     socket.on('get_cumulative_financials', async (data: { teamId: number, quarterId: number }) => {
         try {
             const { getCumulativeFinancials } = require('../../controllers/financialsController');

@@ -19,9 +19,9 @@ export async function submitQuarterBid(teamId: number, quarterId: number, bidPri
 
     // 1. Save RM Bid
     await query(
-        `INSERT OR REPLACE INTO rm_bids (quarter_id, team_id, bid_price_paise, bid_volume, is_locked) 
-         VALUES (?, ?, ?, ?, 1)`,
-        [quarterId, teamId, bidPricePaise, bidVolume]
+        `INSERT OR REPLACE INTO rm_bids (quarter_id, team_id, bid_price_paise, bid_volume, tm_bid_count, is_locked) 
+         VALUES (?, ?, ?, ?, ?, 1)`,
+        [quarterId, teamId, bidPricePaise, bidVolume, tmCount]
     );
 
     // 2. Update TM count
@@ -70,7 +70,7 @@ export async function getQuarterAllocations(quarterId: number) {
     // Return formatted allocation results from DB
     const { rows } = await query(
         `SELECT team_id as "teamId", bid_price_paise as "bidPricePaise", bid_volume as "bidVolume",
-                rank, allocated_volume as "allocatedVolume"
+                rank, allocated_volume as "allocatedVolume", tm_bid_count as "tmBidCount"
          FROM rm_bids 
          WHERE quarter_id = ? AND rank IS NOT NULL 
          ORDER BY rank ASC`,
@@ -92,6 +92,7 @@ export async function submitCustomerBid(teamId: number, quarterId: number, custo
     // BASIC VALIDATION
     if (askPricePaise <= 0) throw new Error("Price must be positive");
     if (askQty <= 0) throw new Error("Quantity must be positive");
+    if (askPricePaise > 7000 * 100) throw new Error("Price cannot exceed ₹7,000/m³");
 
     // Fetch current month from Game State to ensure we bid for the active month
     const { rows: gs } = await query(`SELECT current_month_within_quarter FROM game_state WHERE id = 1`);

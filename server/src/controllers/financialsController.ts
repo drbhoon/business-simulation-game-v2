@@ -63,6 +63,8 @@ export async function calculateMonthlyFinancials(quarterId: number, monthId: num
         let rmPurchaseCostPaise = 0;
         let spotPurchaseCostPaise = 0;
 
+        let rmSpotVol = 0;
+
         // Fetch My RM Bid for Price and Volume
         const { rows: rmBid } = await query(
             `SELECT bid_price_paise, allocated_volume FROM rm_bids WHERE quarter_id = ? AND team_id = ?`,
@@ -74,17 +76,13 @@ export async function calculateMonthlyFinancials(quarterId: number, monthId: num
             `SELECT MAX(bid_price_paise) as max_price FROM rm_bids WHERE quarter_id = ?`,
             [quarterId]
         );
-        const maxRmBidPrice = maxBidRows[0]?.max_price || 5000 * 1000; // Default fallback if no bids
+        const maxRmBidPrice = (maxBidRows && maxBidRows.length > 0 && maxBidRows[0].max_price) ? maxBidRows[0].max_price : 0;
 
         if (rmBid.length > 0) {
             const myRmPrice = rmBid[0].bid_price_paise;
             const myRmVol = rmBid[0].allocated_volume; // Total RM for Quarter
 
             // Calculate Excess
-            // Note: This check only works effectively for 'Cumulative' sales if we track previous months.
-            // For M1, it's Total Vol M1 vs Total RM.
-            // Future TODO: Subtract previous months' consumption from myRmVol to get 'Available RM'.
-
             let normalRmVol = totalVol;
             let excessVol = 0;
 
@@ -92,6 +90,7 @@ export async function calculateMonthlyFinancials(quarterId: number, monthId: num
                 normalRmVol = myRmVol;
                 excessVol = totalVol - myRmVol;
             }
+            rmSpotVol = excessVol;
 
             // Normal Consumption
             rmCostConsumedPaise = normalRmVol * myRmPrice;
@@ -113,14 +112,42 @@ export async function calculateMonthlyFinancials(quarterId: number, monthId: num
         } else {
             // No RM allocated at all? Entire thing is Spot Purchase?
             // Or maybe they didn't bid? Assume Spot for ALL volume.
+            rmSpotVol = totalVol;
             const spotPrice = maxRmBidPrice * 1.10;
             rmCostConsumedPaise = totalVol * spotPrice;
             rmPurchaseCostPaise = rmCostConsumedPaise;
+            spotPurchaseCostPaise = rmCostConsumedPaise;
         }
 
-        // 2. TM Cost
-        const baseTmCost = team.base_tm_count * CONSTANTS.BASE_TM_COST_PAISE;
-        const tmCostPaise = baseTmCost;
+        // 2. TM Cost - CORRECTED LOGIC
+        // Each TM can handle 540 m³ per month
+        // Base TMs cost 180,000 Rs each (paid upfront in Q start)
+        // Extra TMs cost 250,000 Rs each (rented for the month)
+
+        const tmCapacityPerUnit = CONSTANTS.TM_CAPACITY_M3_MONTH; // 540
+        const requiredTMs = Math.ceil(totalVol / tmCapacityPerUnit);
+        const baseTMs = team.base_tm_count;
+
+        let tmCostPaise = 0;
+        let extraTMsNeeded = 0;
+
+        if (requiredTMs > baseTMs) {
+            extraTMsNeeded = requiredTMs - baseTMs;
+            // Base TM cost (only in Month 1 of quarter, as they're purchased upfront)
+            if (monthId === 1) {
+                tmCostPaise = (baseTMs * CONSTANTS.BASE_TM_COST_PAISE) + (extraTMsNeeded * CONSTANTS.EXTRA_TM_COST_PAISE);
+            } else {
+                // In months 2 and 3, only charge for extra TMs
+                tmCostPaise = extraTMsNeeded * CONSTANTS.EXTRA_TM_COST_PAISE;
+            }
+        } else {
+            // Have enough base TMs
+            if (monthId === 1) {
+                tmCostPaise = baseTMs * CONSTANTS.BASE_TM_COST_PAISE;
+            } else {
+                tmCostPaise = 0; // Base TMs already paid for in M1
+            }
+        }
 
         // 3. Production Cost (Tiered)
         const tier = CONSTANTS.COST_TIERS.find(t => totalVol >= t.minVol);
@@ -216,13 +243,15 @@ export async function calculateMonthlyFinancials(quarterId: number, monthId: num
                 team_id, quarter_int, month_int,
                 revenue_paise, rm_cost_paise, tm_cost_paise, prod_cost_paise, expenses_paise, ebitda_paise,
                 cash_opening_paise, cash_closing_paise, receivables_paise,
-                rm_closing_balance, tm_count_current, interest_paid_paise
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                rm_closing_balance, tm_count_current, interest_paid_paise,
+                rm_spot_vol, rm_spot_cost_paise, cash_inflow_paise, sales_vol
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 teamId, quarterId, monthId,
                 totalRevenuePaise, rmCostConsumedPaise, tmCostPaise, prodCostPaise, expensesPaise, ebitdaPaise,
                 openingCashPaise, closingCashPaise, receivablesPaise,
-                rmClosingBalance, currentTmCount, interestPaise
+                rmClosingBalance, currentTmCount, interestPaise,
+                rmSpotVol, spotPurchaseCostPaise, cashInflowFromSalesPaise, totalVol
             ]
         );
 
@@ -279,7 +308,7 @@ export async function getCumulativeFinancials(teamId: number, quarterId: number)
 export async function getAllTeamsFinancials(quarterId: number, monthId: number) {
     // Get financials for this specific month for all teams
     const { rows } = await query(
-        `SELECT f.team_id, t.name as team_name, f.ebitda_paise, f.revenue_paise, f.cash_closing_paise 
+        `SELECT f.*, t.name as team_name 
          FROM financials f
          JOIN teams t ON f.team_id = t.id
          WHERE f.quarter_int = ? AND f.month_int = ?`,
@@ -294,6 +323,14 @@ export async function getTeamFinancials(teamId: number, quarterId: number, month
         [teamId, quarterId, monthId]
     );
     return rows[0]; // Return the object directly or undefined
+}
+
+export async function getTeamFinancialsHistory(teamId: number, quarterId: number) {
+    const { rows } = await query(
+        `SELECT * FROM financials WHERE team_id = ? AND quarter_int = ? ORDER BY month_int ASC`,
+        [teamId, quarterId]
+    );
+    return rows;
 }
 
 export async function getAllTeamsCumulativeFinancials(quarterId: number) {

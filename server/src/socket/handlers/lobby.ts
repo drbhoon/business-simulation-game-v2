@@ -79,6 +79,19 @@ export function handleLobbyEvents(io: Server, socket: Socket) {
         }
     });
 
+    // Admin: Sync/Re-broadcast State
+    socket.on('admin_sync_state', async (password: string) => {
+        if (password !== (process.env.StartGamePassword || 'admin123')) return;
+        try {
+            const gameState = await LobbyController.getGameState();
+            io.emit('game_state_update', gameState);
+            const teams = await LobbyController.getTeams();
+            io.emit('teams_update', teams);
+        } catch (err) {
+            console.error(err);
+        }
+    });
+
     // Admin: Reset Game
     socket.on('admin_reset_game', async (password: string) => {
         if (password !== (process.env.StartGamePassword || 'admin123')) {

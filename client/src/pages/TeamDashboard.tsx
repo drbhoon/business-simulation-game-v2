@@ -29,6 +29,7 @@ const TeamDashboard: React.FC<TeamDashboardProps> = ({ team, gameState }) => {
 
     // 4. Financials State (Hoisted from Month End)
     const [financials, setFinancials] = useState<any>(null);
+    const [financialHistory, setFinancialHistory] = useState<any[]>([]);
     const [customerWins, setCustomerWins] = useState<any[]>([]);
 
     // 5. Persistent Stats State
@@ -71,16 +72,18 @@ const TeamDashboard: React.FC<TeamDashboardProps> = ({ team, gameState }) => {
     // Financials listeners (Persistent)
     useEffect(() => {
         if (!socket) return;
-        // Don't fetch in Lobby/Preroll
-        if (gameState.phase === 'LOBBY' || gameState.phase === 'QUARTER_PREROLL') return;
+        if (!team) return;
 
         const fetchM1 = () => {
             socket.emit('get_my_financials', { teamId: team.id, quarterId: gameState.currentQuarter || 1 });
+            socket.emit('get_my_financials_history', { teamId: team.id, quarterId: gameState.currentQuarter || 1 });
             socket.emit('get_customer_allocations', { quarterId: gameState.currentQuarter || 1 });
         };
         fetchM1();
 
+        socket.on('connect', fetchM1);
         socket.on('my_financials', (data) => setFinancials(data));
+        socket.on('my_financials_history', (data) => setFinancialHistory(data));
         socket.on('financials_updated', fetchM1);
         socket.on('customer_allocation_results', (data: any[]) => {
             const myWins = data.filter(r => r.teamId === team.id && r.allocatedVolume > 0);
@@ -88,11 +91,13 @@ const TeamDashboard: React.FC<TeamDashboardProps> = ({ team, gameState }) => {
         });
 
         return () => {
+            socket.off('connect', fetchM1);
             socket.off('my_financials');
+            socket.off('my_financials_history');
             socket.off('financials_updated');
             socket.off('customer_allocation_results');
         };
-    }, [socket, team.id, gameState.phase, gameState.currentQuarter, gameState.currentMonthWithinQuarter]);
+    }, [socket, team, gameState.currentQuarter]);
 
     // Persistent Stats Polling
     useEffect(() => {
@@ -275,9 +280,10 @@ const TeamDashboard: React.FC<TeamDashboardProps> = ({ team, gameState }) => {
                                 <h3 className="font-bold text-lg text-white mb-2">{custId}</h3>
                                 <div className="space-y-3">
                                     <div className="flex gap-2">
-                                        <input type="number" className="w-1/2 p-2 rounded text-black font-bold" placeholder="Price" onChange={(e) => handleCustomerBidChange(custId, 'price', Number(e.target.value))} />
+                                        <input type="number" max="7000" className="w-1/2 p-2 rounded text-black font-bold" placeholder="Price (Max ₹7000)" onChange={(e) => handleCustomerBidChange(custId, 'price', Number(e.target.value))} />
                                         <input type="number" className="w-1/2 p-2 rounded text-black font-bold" placeholder="Vol" onChange={(e) => handleCustomerBidChange(custId, 'qty', Number(e.target.value))} />
                                     </div>
+                                    <p className="text-xs text-gray-400">Max Price: ₹7,000/m³</p>
                                 </div>
                             </div>
                         ))}
@@ -461,16 +467,156 @@ const TeamDashboard: React.FC<TeamDashboardProps> = ({ team, gameState }) => {
         );
     };
 
+
+    // --- Detailed Report Component ---
+    const DetailedReportView = ({ history }: { history: any[] }) => {
+        if (!history || history.length === 0) return null;
+
+        let cumulativeEbitda = 0;
+        const processedHistory = history.map(h => {
+            cumulativeEbitda += h.ebitda_paise;
+            return { ...h, cumulativeEbitda };
+        });
+
+        return (
+            <div className="space-y-8 mt-10">
+                {/* 1. Monthly Performance */}
+                <div className="bg-gray-800 rounded-lg p-6 shadow-xl border border-gray-700">
+                    <h3 className="text-lg font-bold mb-4 text-blue-400 border-b border-gray-700 pb-2">Monthly Operational Performance</h3>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-xs text-left text-gray-300">
+                            <thead className="bg-gray-700/50 uppercase font-bold text-gray-400">
+                                <tr>
+                                    <th className="p-2">Month</th>
+                                    <th className="p-2 text-right">M3 Volume Allocated</th>
+                                    <th className="p-2 text-right">Revenue (Rs)</th>
+                                    <th className="p-2 text-right">Revenue (Rs/m³)</th>
+                                    <th className="p-2 text-right">RM Cost (Rs)</th>
+                                    <th className="p-2 text-right">RM Cost (Rs/m³)</th>
+                                    <th className="p-2 text-right">TM Cost (Rs)</th>
+                                    <th className="p-2 text-right">TM Cost (Rs/m³)</th>
+                                    <th className="p-2 text-right">Production Cost (Rs)</th>
+                                    <th className="p-2 text-right">Production Cost (Rs/m³)</th>
+                                    <th className="p-2 text-right">EBITDA (Rs)</th>
+                                    <th className="p-2 text-right">EBITDA (Rs/m³)</th>
+                                    <th className="p-2 text-right">Cumulative EBITDA</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-700">
+                                {processedHistory.map((row, i) => {
+                                    const vol = row.sales_vol || 0;
+                                    return (
+                                        <tr key={i} className="hover:bg-gray-700/30">
+                                            <td className="p-2 font-bold text-white">M{row.month_int}</td>
+                                            <td className="p-2 text-right text-white">{vol.toLocaleString()}</td>
+                                            <td className="p-2 text-right text-green-300">{(row.revenue_paise / 100).toLocaleString()}</td>
+                                            <td className="p-2 text-right text-gray-400">{vol > 0 ? (row.revenue_paise / 100 / vol).toFixed(0) : '-'}</td>
+                                            <td className="p-2 text-right text-red-300">{(row.rm_cost_paise / 100).toLocaleString()}</td>
+                                            <td className="p-2 text-right text-gray-400">{vol > 0 ? (row.rm_cost_paise / 100 / vol).toFixed(0) : '-'}</td>
+                                            <td className="p-2 text-right text-red-300">{(row.tm_cost_paise / 100).toLocaleString()}</td>
+                                            <td className="p-2 text-right text-gray-400">{vol > 0 ? (row.tm_cost_paise / 100 / vol).toFixed(0) : '-'}</td>
+                                            <td className="p-2 text-right text-red-300">{(row.prod_cost_paise / 100).toLocaleString()}</td>
+                                            <td className="p-2 text-right text-gray-400">{vol > 0 ? (row.prod_cost_paise / 100 / vol).toFixed(0) : '-'}</td>
+                                            <td className={`p-2 text-right font-bold ${row.ebitda_paise >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                                {(row.ebitda_paise / 100).toLocaleString()}
+                                            </td>
+                                            <td className="p-2 text-right text-gray-400">{vol > 0 ? (row.ebitda_paise / 100 / vol).toFixed(0) : '-'}</td>
+                                            <td className={`p-2 text-right font-bold ${row.cumulativeEbitda >= 0 ? 'text-blue-400' : 'text-red-400'}`}>
+                                                {(row.cumulativeEbitda / 100).toLocaleString()}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                {/* 2. Grid for Cost Tracking & Cash Flow */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Cost Tracking */}
+                    <div className="bg-gray-800 rounded-lg p-6 shadow-xl border border-gray-700">
+                        <h3 className="text-lg font-bold mb-4 text-yellow-400 border-b border-gray-700 pb-2">Spot / Additional Cost Tracking</h3>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-xs text-left text-gray-300">
+                                <thead className="bg-gray-700/50 uppercase font-bold text-gray-400">
+                                    <tr>
+                                        <th className="p-2">Month</th>
+                                        <th className="p-2 text-right">Add'l RM (m³)</th>
+                                        <th className="p-2 text-right">Spot Cost/m³</th>
+                                        <th className="p-2 text-right">Add'l TM</th>
+                                        <th className="p-2 text-right">TM Cost/m³</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-700">
+                                    {history.map((row, i) => {
+                                        const vol = row.sales_vol || 0;
+                                        const spotVol = row.rm_spot_vol || 0;
+                                        const spotCost = row.rm_spot_cost_paise || 0;
+                                        const spotUnitDetails = spotVol > 0 ? (spotCost / 100 / spotVol).toFixed(0) : '-';
+
+                                        return (
+                                            <tr key={i} className="hover:bg-gray-700/30">
+                                                <td className="p-2 font-bold text-white">M{row.month_int}</td>
+                                                <td className="p-2 text-right text-yellow-200">{spotVol > 0 ? spotVol.toLocaleString() : '-'}</td>
+                                                <td className="p-2 text-right text-red-300">{spotUnitDetails}</td>
+                                                <td className="p-2 text-right text-gray-500">-</td>
+                                                <td className="p-2 text-right text-gray-400">{vol > 0 ? (row.tm_cost_paise / 100 / vol).toFixed(0) : '-'}</td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    {/* Cash Flow */}
+                    <div className="bg-gray-800 rounded-lg p-6 shadow-xl border border-gray-700">
+                        <h3 className="text-lg font-bold mb-4 text-green-400 border-b border-gray-700 pb-2">Cash Flow Statement</h3>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-xs text-left text-gray-300">
+                                <thead className="bg-gray-700/50 uppercase font-bold text-gray-400">
+                                    <tr>
+                                        <th className="p-2">Month</th>
+                                        <th className="p-2 text-right">Opening</th>
+                                        <th className="p-2 text-right">Inflow</th>
+                                        <th className="p-2 text-right">Loan Add</th>
+                                        <th className="p-2 text-right">Paid (Int)</th>
+                                        <th className="p-2 text-right">Closing</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-700">
+                                    {history.map((row, i) => (
+                                        <tr key={i} className="hover:bg-gray-700/30">
+                                            <td className="p-2 font-bold text-white">M{row.month_int}</td>
+                                            <td className="p-2 text-right text-white">{(row.cash_opening_paise / 100).toLocaleString()}</td>
+                                            <td className="p-2 text-right text-green-300">{(row.cash_inflow_paise / 100).toLocaleString()}</td>
+                                            <td className="p-2 text-right text-gray-500">-</td>
+                                            <td className="p-2 text-right text-red-300">{(row.interest_paid_paise > 0 ? (row.interest_paid_paise / 100).toLocaleString() : '-')}</td>
+                                            <td className={`p-2 text-right font-bold ${row.cash_closing_paise >= 0 ? 'text-white' : 'text-red-400'}`}>
+                                                {(row.cash_closing_paise / 100).toLocaleString()}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
     return (
-        <div className="min-h-screen bg-gray-900 flex flex-col items-center">
+        <div className="min-h-screen bg-gray-900 flex flex-col items-center pb-20">
             {/* Persistent Header */}
-            <div className="w-full bg-gray-800 border-b border-gray-700 p-4 shadow-md flex justify-between items-center px-10">
+            <div className="w-full bg-gray-800 border-b border-gray-700 p-4 shadow-md flex justify-between items-center px-6 lg:px-10 sticky top-0 z-50">
                 <div className="flex items-center gap-4">
                     <div className="bg-blue-600 rounded-full h-10 w-10 flex items-center justify-center font-bold text-xl">{team.id}</div>
-                    <span className="text-xl font-bold text-white">{team.name}</span>
+                    <span className="text-xl font-bold text-white hidden sm:block">{team.name}</span>
                 </div>
                 {cumulativeStats && (
-                    <div className="flex gap-8 text-sm">
+                    <div className="flex gap-4 md:gap-8 text-sm overflow-x-auto">
                         <div className="text-right">
                             <span className="block text-gray-400 text-xs uppercase">Q{gameState.currentQuarter} EBITDA</span>
                             <span className={`text-lg font-bold ${cumulativeStats.quarterEbitdaPaise >= 0 ? 'text-green-400' : 'text-red-400'}`}>
@@ -478,7 +624,7 @@ const TeamDashboard: React.FC<TeamDashboardProps> = ({ team, gameState }) => {
                             </span>
                         </div>
                         {gameState.currentQuarter > 1 && (
-                            <div className="text-right">
+                            <div className="text-right hidden md:block">
                                 <span className="block text-gray-400 text-xs uppercase">Total Game EBITDA</span>
                                 <span className={`text-lg font-bold ${cumulativeStats.totalGameEbitdaPaise >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                                     ₹{(cumulativeStats.totalGameEbitdaPaise / 100).toLocaleString()}
@@ -487,7 +633,7 @@ const TeamDashboard: React.FC<TeamDashboardProps> = ({ team, gameState }) => {
                         )}
                         <div className="text-right">
                             <span className="block text-gray-400 text-xs uppercase">Cash Balance</span>
-                            <span className="text-lg font-bold text-white">
+                            <span className={`text-lg font-bold ${cumulativeStats.closingCashPaise >= 0 ? 'text-white' : 'text-red-500'}`}>
                                 ₹{(cumulativeStats.closingCashPaise / 100).toLocaleString()}
                             </span>
                         </div>
@@ -504,6 +650,9 @@ const TeamDashboard: React.FC<TeamDashboardProps> = ({ team, gameState }) => {
                 {/* Main Area */}
                 <div className="lg:col-span-3">
                     {renderPhaseContent()}
+
+                    {/* Persistent Detailed Report - Always show if data exists */}
+                    <DetailedReportView history={financialHistory} />
                 </div>
             </div>
         </div>
