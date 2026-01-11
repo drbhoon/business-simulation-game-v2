@@ -5,6 +5,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import setupSocket from './socket';
+import { query } from './db';
 
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
@@ -45,9 +46,38 @@ if (process.env.NODE_ENV === 'production') {
     });
 }
 
+
 const PORT = Number(process.env.PORT) || 3000;
 
-server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on port ${PORT}`);
-    console.log('READY_FOR_TRAFFIC'); // Signal to logs
-});
+// Initialize database and start server
+async function startServer() {
+    try {
+        console.log('[DB Init] Initializing database tables...');
+
+        // Run the initDb script inline
+        const fs = await import('fs');
+        const initDbPath = path.join(__dirname, 'scripts', 'initDb.js');
+
+        if (fs.existsSync(initDbPath)) {
+            console.log('[DB Init] Running initDb script...');
+            await import(initDbPath);
+            console.log('[DB Init] Database initialized successfully');
+        } else {
+            console.log('[DB Init] initDb.js not found, tables may already exist');
+        }
+
+        server.listen(PORT, '0.0.0.0', () => {
+            console.log(`Server running on port ${PORT}`);
+            console.log('READY_FOR_TRAFFIC'); // Signal to logs
+        });
+    } catch (error) {
+        console.error('[DB Init] Error initializing database:', error);
+        // Start server anyway - tables might already exist
+        server.listen(PORT, '0.0.0.0', () => {
+            console.log(`Server running on port ${PORT}`);
+            console.log('READY_FOR_TRAFFIC');
+        });
+    }
+}
+
+startServer();
