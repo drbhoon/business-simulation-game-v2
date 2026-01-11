@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import setupSocket from './socket';
 import { query } from './db';
+import { initDb } from './scripts/initDb';
 
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
@@ -53,18 +54,9 @@ const PORT = Number(process.env.PORT) || 3000;
 async function startServer() {
     try {
         console.log('[DB Init] Initializing database tables...');
+        await initDb();
+        console.log('[DB Init] Database initialization complete');
 
-        // Run the initDb script inline
-        const fs = await import('fs');
-        const initDbPath = path.join(__dirname, 'scripts', 'initDb.js');
-
-        if (fs.existsSync(initDbPath)) {
-            console.log('[DB Init] Running initDb script...');
-            await import(initDbPath);
-            console.log('[DB Init] Database initialized successfully');
-        } else {
-            console.log('[DB Init] initDb.js not found, tables may already exist');
-        }
 
         server.listen(PORT, '0.0.0.0', () => {
             console.log(`Server running on port ${PORT}`);

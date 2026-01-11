@@ -118,15 +118,21 @@ INSERT OR IGNORE INTO game_state (id, current_quarter, phase) VALUES (1, 0, 'LOB
         await client.query(schemaSql);
         await client.query('COMMIT');
 
+
         console.log('Database initialized successfully.');
     } catch (err) {
         await client.query('ROLLBACK');
         console.error('Error initializing database:', err);
-        process.exit(1);
+        throw err;
     } finally {
         client.release();
-        process.exit(0);
     }
 }
 
-initDb();
+// Export for use in other modules
+export { initDb };
+
+// Only run if this script is executed directly
+if (require.main === module) {
+    initDb().then(() => process.exit(0)).catch(() => process.exit(1));
+}
