@@ -120,34 +120,22 @@ export async function calculateMonthlyFinancials(quarterId: number, monthId: num
         }
 
         // 2. TM Cost - CORRECTED LOGIC
-        // Each TM can handle 540 m³ per month
-        // Base TMs cost 180,000 Rs each (paid upfront in Q start)
-        // Extra TMs cost 250,000 Rs each (rented for the month)
+        // TMs allocated for a quarter remain for all 3 months
+        // Monthly rent per TM = ₹150,000
+        // Monthly TM cost = (Number of TMs) × ₹150,000
 
-        const tmCapacityPerUnit = CONSTANTS.TM_CAPACITY_M3_MONTH; // 540
-        const requiredTMs = Math.ceil(totalVol / tmCapacityPerUnit);
-        const baseTMs = team.base_tm_count;
+        // Get the TM bid for this quarter to find allocated TMs
+        const { rows: tmBidRows } = await query(
+            `SELECT tm_bid_count FROM rm_bids WHERE quarter_id = ? AND team_id = ?`,
+            [quarterId, teamId]
+        );
 
-        let tmCostPaise = 0;
-        let extraTMsNeeded = 0;
+        const allocatedTMs = tmBidRows.length > 0 ? (tmBidRows[0].tm_bid_count || 0) : 0;
 
-        if (requiredTMs > baseTMs) {
-            extraTMsNeeded = requiredTMs - baseTMs;
-            // Base TM cost (only in Month 1 of quarter, as they're purchased upfront)
-            if (monthId === 1) {
-                tmCostPaise = (baseTMs * CONSTANTS.BASE_TM_COST_PAISE) + (extraTMsNeeded * CONSTANTS.EXTRA_TM_COST_PAISE);
-            } else {
-                // In months 2 and 3, only charge for extra TMs
-                tmCostPaise = extraTMsNeeded * CONSTANTS.EXTRA_TM_COST_PAISE;
-            }
-        } else {
-            // Have enough base TMs
-            if (monthId === 1) {
-                tmCostPaise = baseTMs * CONSTANTS.BASE_TM_COST_PAISE;
-            } else {
-                tmCostPaise = 0; // Base TMs already paid for in M1
-            }
-        }
+        // Monthly TM rent: ₹150,000 per TM
+        const TM_MONTHLY_RENT_PAISE = 150000 * 100;
+        const tmCostPaise = allocatedTMs * TM_MONTHLY_RENT_PAISE;
+
 
         // 3. Production Cost (Tiered)
         const tier = CONSTANTS.COST_TIERS.find(t => totalVol >= t.minVol);
