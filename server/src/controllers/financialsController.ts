@@ -121,8 +121,9 @@ export async function calculateMonthlyFinancials(quarterId: number, monthId: num
 
         // 2. TM Cost - CORRECTED LOGIC
         // TMs allocated for a quarter remain for all 3 months
-        // Monthly rent per TM = ₹150,000
-        // Monthly TM cost = (Number of TMs) × ₹150,000
+        // Each month:
+        //   - Base TM cost: (TMs bid) × ₹180,000
+        //   - Extra TM cost: If volume > (TMs bid × 540), rent extra TMs at ₹280,000 each
 
         // Get the TM bid for this quarter to find allocated TMs
         const { rows: tmBidRows } = await query(
@@ -132,9 +133,20 @@ export async function calculateMonthlyFinancials(quarterId: number, monthId: num
 
         const allocatedTMs = tmBidRows.length > 0 ? (tmBidRows[0].tm_bid_count || 0) : 0;
 
-        // Monthly TM rent: ₹150,000 per TM
-        const TM_MONTHLY_RENT_PAISE = 150000 * 100;
-        const tmCostPaise = allocatedTMs * TM_MONTHLY_RENT_PAISE;
+        // Calculate required TMs based on this month's volume
+        const TM_CAPACITY_M3_MONTH = 540; // Each TM can handle 540 m³ per month
+        const requiredTMs = Math.ceil(totalVol / TM_CAPACITY_M3_MONTH);
+
+        // Base TM monthly rent: ₹180,000 per TM
+        const BASE_TM_MONTHLY_RENT_PAISE = 180000 * 100;
+        let tmCostPaise = allocatedTMs * BASE_TM_MONTHLY_RENT_PAISE;
+
+        // Extra TMs needed if volume exceeds capacity of allocated TMs
+        if (requiredTMs > allocatedTMs) {
+            const extraTMsNeeded = requiredTMs - allocatedTMs;
+            const EXTRA_TM_MONTHLY_RENT_PAISE = 280000 * 100;
+            tmCostPaise += extraTMsNeeded * EXTRA_TM_MONTHLY_RENT_PAISE;
+        }
 
 
         // 3. Production Cost (Tiered)
